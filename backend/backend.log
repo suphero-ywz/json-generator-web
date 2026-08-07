@@ -1,0 +1,2 @@
+[启动] 数据库已初始化 | 模式: LLM（deepseek-chat）
+INFO:     127.0.0.1:55190 - "GET /api/status HTTP/1.1" 200 OK

@@ -1,0 +1,20 @@
+# 依赖
+frontend/node_modules/
+
+# Python
+backend/__pycache__/
+backend/*.pyc
+
+# 本地数据
+backend/data/
+
+# 密钥
+.env
+backend/.env
+
+# IDE
+.idea/
+.vscode/
+.claude/
+*.swp
+*.swo
