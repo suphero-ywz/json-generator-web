@@ -1,0 +1,11 @@
+[Desktop Entry]
+Type=Application
+Name=JSON生成器
+Name[en]=JSON Generator
+Comment=动作数据集 JSON 生成器
+Comment[en]=Motion Dataset JSON Generator
+Icon=utilities-terminal
+Terminal=true
+Exec=bash scripts/linux/start.sh
+Path=<PROJECT_DIR>
+Categories=Development;Utility;

@@ -31,8 +31,17 @@ python main.py                     # 启动 API 服务 (端口 8000)
 ### 一键启动
 
 ```bash
-# Windows
+# Windows（双击）
 scripts/windows/start.bat
+
+# Linux（终端）
+chmod +x scripts/linux/setup.sh scripts/linux/start.sh
+bash scripts/linux/setup.sh   # 首次运行：安装依赖
+bash scripts/linux/start.sh   # 启动前后端服务
+
+# Linux（双击桌面图标）
+bash scripts/linux/install-desktop.sh   # 安装桌面快捷方式（仅需一次）
+# 之后可从应用菜单或桌面双击「JSON生成器」启动
 ```
 
 ## 项目结构
