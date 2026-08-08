@@ -20,11 +20,32 @@ function Check($url) {
 
 try {
     # ---- 首次运行 ----
-    if (-not (Test-Path "$dir\frontend\node_modules")) {
+    $needSetup = $false
+    if (-not (Test-Path "$dir\frontend\node_modules")) { $needSetup = $true }
+    if ($needSetup) {
         Write-Host "  首次运行 - 需要先安装依赖，请稍候..."
         cmd /c "call `"$PSScriptRoot\setup.bat`""
-        if ($LASTEXITCODE -ne 0) { Read-Host "安装失败，按 Enter 退出"; exit 1 }
+        # setup.bat exit code 0=OK, 2=winget安装成功需重新运行
+        if ($LASTEXITCODE -eq 2) {
+            Write-Host "  环境安装完成，请重新双击 start.bat" -ForegroundColor Yellow
+            Read-Host "  按 Enter 退出"
+            exit 0
+        }
+        if ($LASTEXITCODE -ne 0) { Read-Host "  安装失败，按 Enter 退出"; exit 1 }
     }
+
+    # 检查 Python 依赖
+    python -c "import fastapi" 2>$null
+    if ($LASTEXITCODE -ne 0) {
+        Write-Host "  Python 依赖未安装，正在安装..." -ForegroundColor Yellow
+        python -m pip install -r "$dir\backend\requirements.txt" -q 2>&1
+        if ($LASTEXITCODE -ne 0) {
+            Write-Host "  Python 依赖安装失败，请手动运行 setup.bat" -ForegroundColor Red
+            Read-Host "  按 Enter 退出"
+            exit 1
+        }
+    }
+
     if (-not (Test-Path "$dir\backend\data")) {
         New-Item -ItemType Directory -Path "$dir\backend\data" -Force | Out-Null
     }
