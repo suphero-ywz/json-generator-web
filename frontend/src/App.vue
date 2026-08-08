@@ -50,6 +50,8 @@
         <BatchPanel
           v-model:enabled="batchMode"
           v-model:fileCount="fileCount"
+          v-model:filenamePrefix="filenamePrefix"
+          :date-placeholder="dateString"
         />
         <div class="form-group">
           <label>Actor ID</label>
@@ -161,6 +163,7 @@ export default {
       totalCount: 400,
       batchMode: false,
       fileCount: 5,
+      filenamePrefix: '',
       actorId: 'Skeleton0',
       generating: false,
       errorMsg: '',
@@ -190,12 +193,24 @@ export default {
       const f = this.generatedFiles[this.activeTab]
       return f ? f.data : []
     },
+    dateString() {
+      const d = new Date()
+      const y = d.getFullYear()
+      const m = String(d.getMonth() + 1).padStart(2, '0')
+      const day = String(d.getDate()).padStart(2, '0')
+      return `${y}${m}${day}`
+    },
+    baseFilename() {
+      return this.filenamePrefix || this.dateString
+    },
     downloadFilename() {
       if (this.generatedFiles.length === 1) {
-        return `actions_${this.generatedFiles[0].record_id.slice(0, 8)}.json`
+        return `${this.baseFilename}.json`
       }
       const f = this.generatedFiles[this.activeTab]
-      return f ? `actions_${f.record_id.slice(0, 8)}.json` : 'actions.json'
+      if (!f) return `${this.baseFilename}.json`
+      const idx = this.activeTab + 1
+      return `${this.baseFilename}_${String(idx).padStart(2, '0')}.json`
     },
   },
   async created() {
@@ -313,17 +328,17 @@ export default {
       try {
         const JSZip = (await import('jszip')).default
         const zip = new JSZip()
-        for (const file of this.generatedFiles) {
+        this.generatedFiles.forEach((file, i) => {
           zip.file(
-            `actions_${file.record_id.slice(0, 8)}.json`,
+            `${this.baseFilename}_${String(i + 1).padStart(2, '0')}.json`,
             JSON.stringify(file.data, null, 2)
           )
-        }
+        })
         const blob = await zip.generateAsync({ type: 'blob' })
         const url = URL.createObjectURL(blob)
         const a = document.createElement('a')
         a.href = url
-        a.download = `actions_batch_${this.generatedFiles.length}files.zip`
+        a.download = `${this.baseFilename}.zip`
         a.click()
         URL.revokeObjectURL(url)
       } catch (e) {
