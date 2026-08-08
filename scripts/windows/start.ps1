@@ -1,4 +1,4 @@
-$host.UI.RawUI.WindowTitle = "动作数据集 JSON 生成器"
+﻿$host.UI.RawUI.WindowTitle = "动作数据集 JSON 生成器"
 $dir = Resolve-Path "$PSScriptRoot\..\.."
 
 $beProc = $null
