@@ -12,6 +12,7 @@ from __future__ import annotations
 import uuid
 import asyncio
 import math
+from typing import Awaitable, Callable, Optional
 from element_generator import generate_single as pool_generate_single
 from llm_client import generate_single as llm_generate_single
 from llm_client import generate_batch as llm_generate_batch
@@ -21,6 +22,15 @@ from database import add_many_to_pool, save_history
 
 CONCURRENCY = 12          # 并发 API 请求数
 BATCH_SIZE = 5            # 每次 API 调用生成的记录数
+
+# 取消回调：返回 True 时生成立即中止
+ShouldCancel = Optional[Callable[[], Awaitable[bool]]]
+
+
+async def _check_cancel(should_cancel: ShouldCancel) -> None:
+    """检查是否应取消（用户点击停止 / 客户端断开），是则抛出取消异常。"""
+    if should_cancel is not None and await should_cancel():
+        raise asyncio.CancelledError("生成已被取消")
 
 
 def _calc_category_counts(
@@ -63,6 +73,7 @@ async def generate(
     total_count: int,
     mode: str,
     actor_id: str = "Skeleton0",
+    should_cancel: ShouldCancel = None,
 ) -> dict:
     """单次生成，带重试补全确保达到目标条数。"""
     use_llm = (mode == "llm")
@@ -72,6 +83,7 @@ async def generate(
     max_rounds = 8 if use_llm else 20
 
     for _round in range(max_rounds):
+        await _check_cancel(should_cancel)
         shortfall = total_count - len(all_data)
         if shortfall <= 0:
             break
@@ -84,6 +96,7 @@ async def generate(
 
         async def _run_chunk(cat_name: str, count: int) -> list[dict]:
             async with sem:
+                await _check_cancel(should_cancel)
                 used = set(r["query"] for r in all_data)
                 if use_llm:
                     records = await llm_generate_batch(cat_name, count, [])
@@ -115,6 +128,7 @@ async def generate(
     # 最后一轮：放宽去重，允许同 query 不同 motion_description 的记录
     final_round = 0
     while len(all_data) < total_count and final_round < 5:
+        await _check_cancel(should_cancel)
         final_round += 1
         sf = total_count - len(all_data)
         sf_by_cat = _calc_category_counts(categories, sf)
@@ -122,6 +136,7 @@ async def generate(
         sem2 = asyncio.Semaphore(CONCURRENCY)
         async def _run_relaxed(cat_name: str, cnt: int) -> list[dict]:
             async with sem2:
+                await _check_cancel(should_cancel)
                 records = [pool_generate_single(cat_name, set()) for _ in range(cnt)]
                 return [r for r in records if r is not None]
 
@@ -136,6 +151,8 @@ async def generate(
         if added == 0:
             break
 
+    # 取消后不再保存任何数据
+    await _check_cancel(should_cancel)
     _enrich_records(all_data, actor_id)
     record_id = str(uuid.uuid4())
 
@@ -171,6 +188,7 @@ async def generate_batch(
     file_count: int,
     mode: str,
     actor_id: str = "Skeleton0",
+    should_cancel: ShouldCancel = None,
 ) -> dict:
     """批量生成（每个文件内带重试补全）。"""
     use_llm = (mode == "llm")
@@ -178,10 +196,12 @@ async def generate_batch(
     max_rounds = 8 if use_llm else 20
 
     for _i in range(file_count):
+        await _check_cancel(should_cancel)
         file_data: list[dict] = []
         file_queries: set[str] = set()
 
         for _round in range(max_rounds):
+            await _check_cancel(should_cancel)
             shortfall = total_count - len(file_data)
             if shortfall <= 0:
                 break
@@ -193,6 +213,7 @@ async def generate_batch(
 
             async def _run_chunk(cat_name: str, count: int) -> list[dict]:
                 async with sem:
+                    await _check_cancel(should_cancel)
                     used = set(r["query"] for r in file_data)
                     if use_llm:
                         records = await llm_generate_batch(cat_name, count, [])
@@ -224,6 +245,7 @@ async def generate_batch(
         # 最后一轮：放宽去重
         final_round = 0
         while len(file_data) < total_count and final_round < 5:
+            await _check_cancel(should_cancel)
             final_round += 1
             sf = total_count - len(file_data)
             sf_by_cat = _calc_category_counts(categories, sf)
@@ -231,6 +253,7 @@ async def generate_batch(
             sem3 = asyncio.Semaphore(CONCURRENCY)
             async def _run_relaxed_b(cat_name: str, cnt: int) -> list[dict]:
                 async with sem3:
+                    await _check_cancel(should_cancel)
                     records = [pool_generate_single(cat_name, set()) for _ in range(cnt)]
                     return [r for r in records if r is not None]
 
@@ -245,6 +268,8 @@ async def generate_batch(
             if added == 0:
                 break
 
+        # 取消后不再保存任何数据
+        await _check_cancel(should_cancel)
         _enrich_records(file_data, actor_id)
         file_id = str(uuid.uuid4())
 

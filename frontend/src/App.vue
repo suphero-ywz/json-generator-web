@@ -64,11 +64,18 @@
         </div>
       </div>
       <GenerateButton
-        :disabled="!canGenerate"
+        :disabled="!canGenerate || generating"
         :loading="generating"
         :mode="mode"
         @generate="handleGenerate"
       />
+      <button
+        v-if="generating"
+        class="btn-stop"
+        @click="stopGenerate"
+      >
+        🛑 停止生成
+      </button>
     </div>
 
     <!-- 错误提示 -->
@@ -172,6 +179,8 @@ export default {
       backendOffline: false,
       healthChecking: false,
       _healthTimer: null,
+      _abortController: null,
+      _currentTaskId: null,
     }
   },
   computed: {
@@ -221,6 +230,44 @@ export default {
     clearInterval(this._healthTimer)
   },
   methods: {
+    _newTaskId() {
+      // crypto.randomUUID 仅在安全上下文可用，非 localhost 部署时回退
+      if (window.crypto && crypto.randomUUID) {
+        return crypto.randomUUID()
+      }
+      return `task-${Date.now()}-${Math.random().toString(36).slice(2)}`
+    },
+
+    /** 开始一次生成：创建取消控制器并记录 task_id */
+    _beginTask() {
+      const controller = new AbortController()
+      const taskId = this._newTaskId()
+      this._abortController = controller
+      this._currentTaskId = taskId
+      return { signal: controller.signal, taskId }
+    },
+
+    /** 清理取消控制器 */
+    _endTask() {
+      this._abortController = null
+      this._currentTaskId = null
+    },
+
+    stopGenerate() {
+      if (!this.generating) return
+      // 通知后端停止任务（后端会中断后续 LLM 调用）
+      if (this._currentTaskId) {
+        api.cancelGenerate(this._currentTaskId).catch(() => {})
+      }
+      // 中止前端请求，立即恢复界面
+      if (this._abortController) {
+        this._abortController.abort()
+      }
+      this.generating = false
+      this.errorMsg = '已停止生成'
+      this._endTask()
+    },
+
     async checkHealth() {
       this.healthChecking = true
       try {
@@ -235,10 +282,12 @@ export default {
     },
 
     async handleGenerate() {
+      if (this.generating) return
       this.generating = true
       this.errorMsg = ''
       this.generatedFiles = []
 
+      const opts = this._beginTask()
       const categories = this.selectedCategories.map((name) => ({
         name,
         weight: this.weights[name] || 1,
@@ -251,7 +300,7 @@ export default {
             file_count: this.fileCount,
             categories,
             actor_id: this.actorId,
-          }, this.generationMode)
+          }, this.generationMode, opts)
           if (res.success) {
             this.generatedFiles = res.files.map((f) => ({
               record_id: f.record_id,
@@ -267,7 +316,7 @@ export default {
             total_count: this.totalCount,
             categories,
             actor_id: this.actorId,
-          }, this.generationMode)
+          }, this.generationMode, opts)
           if (res.success) {
             this.generatedFiles = [{
               record_id: res.record_id,
@@ -280,9 +329,14 @@ export default {
           }
         }
       } catch (e) {
-        this.errorMsg = e.message || '网络请求失败，请确认后端已启动'
+        if (e.name === 'AbortError') {
+          this.errorMsg = '已停止生成'
+        } else {
+          this.errorMsg = e.message || '网络请求失败，请确认后端已启动'
+        }
       } finally {
         this.generating = false
+        this._endTask()
       }
     },
 
@@ -296,8 +350,9 @@ export default {
       this.generating = true
       this.errorMsg = ''
       this.generatedFiles = []
+      const opts = this._beginTask()
       try {
-        const res = await api.regenerate(id)
+        const res = await api.regenerate(id, opts)
         if (res.success) {
           if (type === 'single') {
             this.generatedFiles = [{
@@ -317,9 +372,14 @@ export default {
           this.errorMsg = res.error || '重新生成失败'
         }
       } catch (e) {
-        this.errorMsg = e.message || '请求失败'
+        if (e.name === 'AbortError') {
+          this.errorMsg = '已停止生成'
+        } else {
+          this.errorMsg = e.message || '请求失败'
+        }
       } finally {
         this.generating = false
+        this._endTask()
         this.$refs.historyPanel?.refresh()
       }
     },

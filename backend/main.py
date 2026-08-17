@@ -4,6 +4,7 @@ FastAPI 入口 + 路由
 提供以下 API：
 - POST /api/generate         单次生成
 - POST /api/generate/batch   批量生成
+- POST /api/generate/cancel  取消进行中的生成
 - GET  /api/status           检查 LLM 可用性
 - GET  /api/history          历史记录列表
 - DELETE /api/history/{id}    删除历史
@@ -17,6 +18,7 @@ import os
 import sys
 import uuid
 import asyncio
+from typing import Dict, Optional
 from dotenv import load_dotenv
 
 # 确保 .env 从正确的目录加载
@@ -24,11 +26,11 @@ _ENV_PATH = os.path.join(os.path.dirname(os.path.abspath(__file__)), ".env")
 load_dotenv(_ENV_PATH)
 from contextlib import asynccontextmanager
 
-from fastapi import FastAPI, UploadFile, File, HTTPException
+from fastapi import FastAPI, UploadFile, File, HTTPException, Request
 from fastapi.middleware.cors import CORSMiddleware
 
 from models import (
-    GenerateRequest, BatchGenerateRequest,
+    GenerateRequest, BatchGenerateRequest, CancelRequest,
     GenerateResponse, BatchGenerateResponse,
     StatusResponse, ImportResult, QueryPoolStats,
 )
@@ -43,6 +45,23 @@ from llm_client import check_api
 # 全局状态：LLM 是否可用
 _llm_available: bool = False
 _llm_model: str = "deepseek-chat"
+
+# 进行中的生成任务（task_id -> Task），用于取消生成
+_active_tasks: Dict[str, asyncio.Task] = {}
+
+
+def _register_task(task_id: Optional[str]) -> Optional[str]:
+    """注册当前协程任务，返回实际使用的 task_id（未提供时不注册）。"""
+    if not task_id:
+        return None
+    _active_tasks[task_id] = asyncio.current_task()
+    return task_id
+
+
+def _unregister_task(task_id: Optional[str]) -> None:
+    """任务结束后从注册表移除。"""
+    if task_id:
+        _active_tasks.pop(task_id, None)
 
 
 def _resolve_mode(request_mode: str) -> str:
@@ -102,29 +121,55 @@ async def api_status():
 
 
 @app.post("/api/generate", response_model=GenerateResponse)
-async def api_generate(req: GenerateRequest):
+async def api_generate(req: GenerateRequest, request: Request):
     """单次生成"""
+    task_id = _register_task(req.task_id)
     try:
         categories = [c.model_dump() for c in req.categories]
         mode = _resolve_mode(req.mode)
-        result = await generate(categories, req.total_count, mode, req.actor_id)
+        result = await generate(
+            categories, req.total_count, mode, req.actor_id,
+            should_cancel=request.is_disconnected,
+        )
         return GenerateResponse(**result)
+    except asyncio.CancelledError:
+        print("[取消] 单次生成任务已停止")
+        return GenerateResponse(success=False, mode="error", error="生成已取消")
     except Exception as e:
         return GenerateResponse(success=False, mode="error", error=str(e))
+    finally:
+        _unregister_task(task_id)
 
 
 @app.post("/api/generate/batch", response_model=BatchGenerateResponse)
-async def api_generate_batch(req: BatchGenerateRequest):
+async def api_generate_batch(req: BatchGenerateRequest, request: Request):
     """批量生成"""
+    task_id = _register_task(req.task_id)
     try:
         categories = [c.model_dump() for c in req.categories]
         mode = _resolve_mode(req.mode)
         result = await generate_batch(
-            categories, req.total_count, req.file_count, mode, req.actor_id
+            categories, req.total_count, req.file_count, mode, req.actor_id,
+            should_cancel=request.is_disconnected,
         )
         return BatchGenerateResponse(**result)
+    except asyncio.CancelledError:
+        print("[取消] 批量生成任务已停止")
+        return BatchGenerateResponse(success=False, mode="error", error="生成已取消")
     except Exception as e:
         return BatchGenerateResponse(success=False, mode="error", error=str(e))
+    finally:
+        _unregister_task(task_id)
+
+
+@app.post("/api/generate/cancel")
+async def api_cancel_generate(req: CancelRequest):
+    """取消进行中的生成任务"""
+    task = _active_tasks.get(req.task_id)
+    if task is None:
+        return {"success": False, "error": "没有进行中的生成任务"}
+    task.cancel()
+    return {"success": True}
 
 
 @app.get("/api/history")
@@ -145,7 +190,10 @@ async def api_delete_history(record_id: str):
 
 
 @app.post("/api/history/{record_id}/regenerate")
-async def api_regenerate(record_id: str, mode: str = "auto"):
+async def api_regenerate(
+    record_id: str, request: Request,
+    mode: str = "auto", task_id: Optional[str] = None,
+):
     """用相同参数重新生成"""
     record = await get_history(record_id)
     if not record:
@@ -155,14 +203,25 @@ async def api_regenerate(record_id: str, mode: str = "auto"):
     count = record["count_per_file"]
     resolved_mode = _resolve_mode(mode)
 
-    if record["type"] == "single":
-        result = await generate(categories, count, resolved_mode)
-        return GenerateResponse(**result)
-    else:
-        result = await generate_batch(
-            categories, count, record["file_count"], resolved_mode
-        )
-        return BatchGenerateResponse(**result)
+    task_id = _register_task(task_id)
+    try:
+        if record["type"] == "single":
+            result = await generate(
+                categories, count, resolved_mode,
+                should_cancel=request.is_disconnected,
+            )
+            return GenerateResponse(**result)
+        else:
+            result = await generate_batch(
+                categories, count, record["file_count"], resolved_mode,
+                should_cancel=request.is_disconnected,
+            )
+            return BatchGenerateResponse(**result)
+    except asyncio.CancelledError:
+        print("[取消] 重新生成任务已停止")
+        return GenerateResponse(success=False, mode="error", error="生成已取消")
+    finally:
+        _unregister_task(task_id)
 
 
 @app.post("/api/import", response_model=ImportResult)

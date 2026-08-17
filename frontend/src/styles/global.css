@@ -350,6 +350,27 @@ body {
   cursor: not-allowed;
 }
 
+/* --- Stop Button --- */
+.btn-stop {
+  display: block;
+  width: 100%;
+  padding: 10px;
+  border: 1px solid var(--danger);
+  border-radius: var(--radius-sm);
+  background: #fdf0ef;
+  color: var(--danger);
+  font-size: 0.95rem;
+  font-weight: 600;
+  cursor: pointer;
+  transition: all 0.15s;
+  margin-top: 10px;
+}
+
+.btn-stop:hover {
+  background: var(--danger);
+  color: #fff;
+}
+
 /* --- Preview Table --- */
 .preview-header {
   display: flex;

@@ -18,19 +18,29 @@ export const api = {
     return request('/status')
   },
 
-  /** 单次生成 */
-  generate(data, mode) {
+  /** 单次生成（opts.taskId 用于取消，opts.signal 用于中止请求） */
+  generate(data, mode, opts = {}) {
     return request('/generate', {
       method: 'POST',
-      body: JSON.stringify({ ...data, mode }),
+      body: JSON.stringify({ ...data, mode, task_id: opts.taskId }),
+      signal: opts.signal,
     })
   },
 
-  /** 批量生成 */
-  generateBatch(data, mode) {
+  /** 批量生成（opts.taskId 用于取消，opts.signal 用于中止请求） */
+  generateBatch(data, mode, opts = {}) {
     return request('/generate/batch', {
       method: 'POST',
-      body: JSON.stringify({ ...data, mode }),
+      body: JSON.stringify({ ...data, mode, task_id: opts.taskId }),
+      signal: opts.signal,
+    })
+  },
+
+  /** 取消进行中的生成任务 */
+  cancelGenerate(taskId) {
+    return request('/generate/cancel', {
+      method: 'POST',
+      body: JSON.stringify({ task_id: taskId }),
     })
   },
 
@@ -44,9 +54,13 @@ export const api = {
     return request(`/history/${encodeURIComponent(id)}`, { method: 'DELETE' })
   },
 
-  /** 重新生成 */
-  regenerate(id) {
-    return request(`/history/${encodeURIComponent(id)}/regenerate`, { method: 'POST' })
+  /** 重新生成（opts.taskId 用于取消，opts.signal 用于中止请求） */
+  regenerate(id, opts = {}) {
+    const query = opts.taskId ? `?task_id=${encodeURIComponent(opts.taskId)}` : ''
+    return request(`/history/${encodeURIComponent(id)}/regenerate${query}`, {
+      method: 'POST',
+      signal: opts.signal,
+    })
   },
 
   /** 导入 JSON */

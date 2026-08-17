@@ -12,6 +12,7 @@ class GenerateRequest(BaseModel):
     categories: List[CategoryWeight]
     mode: str = Field(default="auto", description="生成模式: llm / element_pool / auto")
     actor_id: str = Field(default="Skeleton0", description="actor_id 中 Skeleton 后缀")
+    task_id: Optional[str] = Field(default=None, description="任务 ID，用于取消生成")
 
 
 class BatchGenerateRequest(BaseModel):
@@ -20,6 +21,11 @@ class BatchGenerateRequest(BaseModel):
     categories: List[CategoryWeight]
     mode: str = Field(default="auto", description="生成模式: llm / element_pool / auto")
     actor_id: str = Field(default="Skeleton0", description="actor_id 中 Skeleton 后缀")
+    task_id: Optional[str] = Field(default=None, description="任务 ID，用于取消生成")
+
+
+class CancelRequest(BaseModel):
+    task_id: str = Field(description="要取消的生成任务 ID")
 
 
 class ActionRecord(BaseModel):
