@@ -23,8 +23,8 @@ from element_pool import (
     get_actions_for_category,
 )
 
-API_BASE = "https://api.deepseek.com/v1"
-MODEL_NAME = "deepseek-chat"  # DeepSeek-V3，中文能力强
+API_BASE = os.getenv("DEEPSEEK_API_BASE", "https://api.deepseek.com/v1")
+MODEL_NAME = os.getenv("DEEPSEEK_MODEL", "deepseek-chat")  # DeepSeek-V3，中文能力强
 TIMEOUT = 60  # 单次生成超时秒数
 
 
@@ -33,9 +33,14 @@ def _get_api_key() -> str:
     return os.getenv("DEEPSEEK_API_KEY", "")
 
 
+def _is_local() -> bool:
+    """是否使用本地推理服务（Ollama 等，无需 API Key）"""
+    return "localhost" in API_BASE or "127.0.0.1" in API_BASE
+
+
 def check_api() -> bool:
-    """检测 DeepSeek API 是否可用（仅检查 Key 是否配置）"""
-    return bool(_get_api_key())
+    """检测 LLM 是否可用（本地服务无需 Key，云端需配置 Key）"""
+    return _is_local() or bool(_get_api_key())
 
 
 async def check_api_online() -> tuple[bool, str]:
@@ -128,8 +133,8 @@ def _fix_json(json_str: str) -> str:
 async def _call_llm_with_retry(payload: dict, max_retries: int = 2) -> dict | None:
     """带指数退避重试的 LLM API 调用。"""
     api_key = _get_api_key()
-    if not api_key:
-        print("[LLM] DEEPSEEK_API_KEY 未配置")
+    if not _is_local() and not api_key:
+        print("[LLM] 未配置 DEEPSEEK_API_KEY，且未启用本地模型")
         return None
     headers = {
         "Authorization": f"Bearer {api_key}",
@@ -179,7 +184,7 @@ async def generate_single(category: str, recent_queries: list[str],
         解析后的动作数据 dict，失败返回 None
     """
     api_key = _get_api_key()
-    if not api_key:
+    if not _is_local() and not api_key:
         return None
 
     system_prompt = _build_system_prompt()
@@ -227,7 +232,7 @@ async def generate_batch(category: str, count: int,
         解析后的动作数据列表，失败返回空列表
     """
     api_key = _get_api_key()
-    if not api_key:
+    if not _is_local() and not api_key:
         return []
 
     system_prompt = _build_system_prompt()

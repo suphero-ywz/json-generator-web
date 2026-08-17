@@ -28,9 +28,16 @@ New-Item -ItemType Directory -Path "$tempDir\backend\data" -Force | Out-Null
 
 # 创建 .env.example
 @"
-# DeepSeek API Key（选填，不填则使用要素池模式）
-# 注册地址：https://platform.deepseek.com
+# ===== 云端模式（默认）=====
+# DeepSeek API Key，注册地址：https://platform.deepseek.com
 DEEPSEEK_API_KEY=
+
+# ===== 本地模式（可选，配合 Ollama，不消耗 API token）=====
+# 使用步骤：
+#   1. 安装 Ollama 并拉取小模型：ollama pull qwen3:8b
+#   2. 取消下面两行注释，保存为 .env，重新启动项目
+# DEEPSEEK_API_BASE=http://127.0.0.1:11434/v1
+# DEEPSEEK_MODEL=qwen3:8b
 "@ | Out-File -FilePath "$tempDir\backend\.env.example" -Encoding UTF8
 
 # 压缩

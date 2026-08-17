@@ -39,7 +39,7 @@ from database import (
     save_history, add_many_to_pool, get_pool_stats,
 )
 from generator import generate, generate_batch
-from llm_client import check_api
+from llm_client import check_api, MODEL_NAME
 
 
 # 全局状态：LLM 是否可用
@@ -75,7 +75,7 @@ def _resolve_mode(request_mode: str) -> str:
 
 # 全局状态：LLM 是否可用
 _llm_available: bool = False
-_llm_model: str = "deepseek-chat"
+_llm_model: str = MODEL_NAME
 
 
 @asynccontextmanager
