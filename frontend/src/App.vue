@@ -12,15 +12,26 @@
     <header class="header">
       <h1>动作数据集 JSON 生成器</h1>
       <div class="header-right">
-        <span :class="['mode-badge', backendOffline ? 'offline' : (resolvedMode === 'llm' ? 'llm' : 'pool')]">
-          {{ backendOffline ? '🔴 未连接' : (resolvedMode === 'llm' ? '🟢 LLM 模式' : '🟡 要素池模式') }}
+        <span :class="['mode-badge', backendOffline ? 'offline' : (generationMode === 'llm' ? 'llm' : 'pool')]">
+          {{ backendOffline ? '🔴 未连接' : (generationMode === 'llm' ? `🟢 LLM · ${currentProviderModel}` : '🟡 要素池模式') }}
         </span>
         <label class="mode-toggle" v-if="!backendOffline">
           <span class="toggle-label">生成模式：</span>
           <select v-model="generationMode" class="mode-select">
-            <option value="auto">自动（{{ detectedMode === 'llm' ? 'LLM' : '要素池' }}）</option>
-            <option value="llm">LLM（DeepSeek）</option>
-            <option value="element_pool">要素池（本地）</option>
+            <option value="llm">LLM 模式</option>
+            <option value="element_pool">要素池模式</option>
+          </select>
+        </label>
+        <label class="mode-toggle" v-if="!backendOffline && generationMode === 'llm' && availableProviders.length > 0">
+          <span class="toggle-label">大模型：</span>
+          <select v-model="provider" class="mode-select">
+            <option
+              v-for="p in availableProviders"
+              :key="p.id"
+              :value="p.id"
+            >
+              {{ p.label }} · {{ p.model }}{{ p.online ? '' : '（离线）' }}
+            </option>
           </select>
         </label>
       </div>
@@ -115,7 +126,10 @@
 
     <!-- 加载状态 -->
     <div class="card" v-if="generating">
-      <div class="loading-state">正在生成数据，请稍候...</div>
+      <div class="loading-state">
+        正在生成数据，请稍候...（已等待 {{ elapsedStr }}）
+        <div class="loading-hint">LLM 模式下每条约 20-30 秒，条数较多时请耐心等待或点击「停止生成」</div>
+      </div>
     </div>
 
     <!-- 导入区域 -->
@@ -163,7 +177,7 @@ export default {
   data() {
     return {
       mode: 'element_pool',
-      generationMode: 'auto',
+      generationMode: 'element_pool',
       allCategories: ALL_CATEGORIES,
       selectedCategories: [],
       weights: {},
@@ -177,19 +191,31 @@ export default {
       generatedFiles: [],
       activeTab: 0,
       backendOffline: false,
+      modelName: '',
+      provider: 'auto',
+      providers: [],
       healthChecking: false,
+      elapsedSeconds: 0,
       _healthTimer: null,
       _abortController: null,
       _currentTaskId: null,
+      _modeInitialized: false,
+      _elapsedTimer: null,
     }
   },
   computed: {
-    detectedMode() {
-      return this.mode
+    availableProviders() {
+      // 仅显示已配置的 LLM 后端
+      return this.providers.filter((p) => p.available)
     },
-    resolvedMode() {
-      if (this.generationMode === 'auto') return this.mode
-      return this.generationMode
+    currentProvider() {
+      return this.providers.find((p) => p.id === this.provider) || null
+    },
+    currentProviderModel() {
+      if (this.currentProvider) {
+        return this.currentProvider.model
+      }
+      return this.modelName || 'LLM'
     },
     canGenerate() {
       if (this.selectedCategories.length === 0) return false
@@ -212,6 +238,11 @@ export default {
     baseFilename() {
       return this.filenamePrefix || this.dateString
     },
+    elapsedStr() {
+      const m = Math.floor(this.elapsedSeconds / 60)
+      const s = this.elapsedSeconds % 60
+      return m > 0 ? `${m} 分 ${s} 秒` : `${s} 秒`
+    },
     downloadFilename() {
       if (this.generatedFiles.length === 1) {
         return `${this.baseFilename}.json`
@@ -225,9 +256,12 @@ export default {
   async created() {
     await this.checkHealth()
     this._healthTimer = setInterval(() => this.checkHealth(), 10000)
+    // 页面刷新/关闭时通知后端取消生成（卸载阶段 fetch 不可靠，用 sendBeacon）
+    window.addEventListener('pagehide', this._handlePageUnload)
   },
   beforeUnmount() {
     clearInterval(this._healthTimer)
+    window.removeEventListener('pagehide', this._handlePageUnload)
   },
   methods: {
     _newTaskId() {
@@ -236,6 +270,16 @@ export default {
         return crypto.randomUUID()
       }
       return `task-${Date.now()}-${Math.random().toString(36).slice(2)}`
+    },
+
+    /** 页面卸载（刷新/关闭/回收）时用 sendBeacon 取消后端生成任务 */
+    _handlePageUnload() {
+      if (!this.generating || !this._currentTaskId) return
+      const body = new Blob(
+        [JSON.stringify({ task_id: this._currentTaskId })],
+        { type: 'application/json' },
+      )
+      navigator.sendBeacon('/api/generate/cancel', body)
     },
 
     /** 开始一次生成：创建取消控制器并记录 task_id */
@@ -253,6 +297,20 @@ export default {
       this._currentTaskId = null
     },
 
+    _startElapsed() {
+      this.elapsedSeconds = 0
+      this._elapsedTimer = setInterval(() => {
+        this.elapsedSeconds += 1
+      }, 1000)
+    },
+
+    _stopElapsed() {
+      if (this._elapsedTimer) {
+        clearInterval(this._elapsedTimer)
+        this._elapsedTimer = null
+      }
+    },
+
     stopGenerate() {
       if (!this.generating) return
       // 通知后端停止任务（后端会中断后续 LLM 调用）
@@ -265,6 +323,7 @@ export default {
       }
       this.generating = false
       this.errorMsg = '已停止生成'
+      this._stopElapsed()
       this._endTask()
     },
 
@@ -273,9 +332,20 @@ export default {
       try {
         const s = await api.status()
         this.mode = s.mode
+        this.modelName = s.model || ''
+        this.providers = s.providers || []
         this.backendOffline = false
+        // 首次连接成功后：按后端状态初始化模式与大模型（之后尊重用户手动选择）
+        if (!this._modeInitialized) {
+          this._modeInitialized = true
+          this.generationMode = s.mode === 'llm' ? 'llm' : 'element_pool'
+          const first = this.availableProviders[0]
+          if (first) this.provider = first.id
+        }
       } catch (e) {
         this.backendOffline = true
+        this.modelName = ''
+        this.providers = []
       } finally {
         this.healthChecking = false
       }
@@ -286,6 +356,7 @@ export default {
       this.generating = true
       this.errorMsg = ''
       this.generatedFiles = []
+      this._startElapsed()
 
       const opts = this._beginTask()
       const categories = this.selectedCategories.map((name) => ({
@@ -300,6 +371,7 @@ export default {
             file_count: this.fileCount,
             categories,
             actor_id: this.actorId,
+            provider: this.provider,
           }, this.generationMode, opts)
           if (res.success) {
             this.generatedFiles = res.files.map((f) => ({
@@ -316,6 +388,7 @@ export default {
             total_count: this.totalCount,
             categories,
             actor_id: this.actorId,
+            provider: this.provider,
           }, this.generationMode, opts)
           if (res.success) {
             this.generatedFiles = [{
@@ -336,6 +409,7 @@ export default {
         }
       } finally {
         this.generating = false
+        this._stopElapsed()
         this._endTask()
       }
     },
@@ -350,9 +424,10 @@ export default {
       this.generating = true
       this.errorMsg = ''
       this.generatedFiles = []
+      this._startElapsed()
       const opts = this._beginTask()
       try {
-        const res = await api.regenerate(id, opts)
+        const res = await api.regenerate(id, { ...opts, provider: this.provider })
         if (res.success) {
           if (type === 'single') {
             this.generatedFiles = [{
@@ -379,6 +454,7 @@ export default {
         }
       } finally {
         this.generating = false
+        this._stopElapsed()
         this._endTask()
         this.$refs.historyPanel?.refresh()
       }

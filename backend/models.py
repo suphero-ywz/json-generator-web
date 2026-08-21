@@ -12,6 +12,7 @@ class GenerateRequest(BaseModel):
     categories: List[CategoryWeight]
     mode: str = Field(default="auto", description="生成模式: llm / element_pool / auto")
     actor_id: str = Field(default="Skeleton0", description="actor_id 中 Skeleton 后缀")
+    provider: str = Field(default="auto", description="LLM 后端: auto / deepseek / ollama")
     task_id: Optional[str] = Field(default=None, description="任务 ID，用于取消生成")
 
 
@@ -21,11 +22,12 @@ class BatchGenerateRequest(BaseModel):
     categories: List[CategoryWeight]
     mode: str = Field(default="auto", description="生成模式: llm / element_pool / auto")
     actor_id: str = Field(default="Skeleton0", description="actor_id 中 Skeleton 后缀")
+    provider: str = Field(default="auto", description="LLM 后端: auto / deepseek / ollama")
     task_id: Optional[str] = Field(default=None, description="任务 ID，用于取消生成")
 
 
 class CancelRequest(BaseModel):
-    task_id: str = Field(description="要取消的生成任务 ID")
+    task_id: Optional[str] = Field(default=None, description="要取消的生成任务 ID；为空时取消所有进行中的任务")
 
 
 class ActionRecord(BaseModel):
@@ -59,10 +61,19 @@ class BatchGenerateResponse(BaseModel):
     error: Optional[str] = None
 
 
+class ProviderInfo(BaseModel):
+    id: str
+    label: str
+    model: str
+    available: bool
+    online: bool
+
+
 class StatusResponse(BaseModel):
     llm_available: bool
     mode: str
-    model: str = "qwen3:4b"
+    model: str
+    providers: List[ProviderInfo] = []
 
 
 class HistoryItem(BaseModel):

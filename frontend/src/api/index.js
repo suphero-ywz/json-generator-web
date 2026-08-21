@@ -54,10 +54,13 @@ export const api = {
     return request(`/history/${encodeURIComponent(id)}`, { method: 'DELETE' })
   },
 
-  /** 重新生成（opts.taskId 用于取消，opts.signal 用于中止请求） */
+  /** 重新生成（opts.taskId 用于取消，opts.signal 用于中止请求，opts.provider 指定后端） */
   regenerate(id, opts = {}) {
-    const query = opts.taskId ? `?task_id=${encodeURIComponent(opts.taskId)}` : ''
-    return request(`/history/${encodeURIComponent(id)}/regenerate${query}`, {
+    const params = new URLSearchParams()
+    if (opts.taskId) params.set('task_id', opts.taskId)
+    if (opts.provider) params.set('provider', opts.provider)
+    const q = params.toString() ? `?${params}` : ''
+    return request(`/history/${encodeURIComponent(id)}/regenerate${q}`, {
       method: 'POST',
       signal: opts.signal,
     })
