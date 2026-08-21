@@ -12,6 +12,9 @@ backend/data/
 .env
 backend/.env
 
+# 运行日志
+backend/*.log
+
 # IDE
 .idea/
 .vscode/
