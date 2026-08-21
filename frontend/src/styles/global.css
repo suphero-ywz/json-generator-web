@@ -590,6 +590,12 @@ table td.text-col {
   vertical-align: middle;
 }
 
+.loading-hint {
+  margin-top: 10px;
+  font-size: 0.8rem;
+  color: var(--text-secondary, #7f8c9b);
+}
+
 .error-state {
   text-align: center;
   padding: 20px;
