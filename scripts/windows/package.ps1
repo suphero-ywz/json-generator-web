@@ -17,28 +17,14 @@ if (Test-Path $outputZip) { Remove-Item $outputZip -Force }
 # 创建临时目录
 New-Item -ItemType Directory -Path $tempDir -Force | Out-Null
 
-# 复制文件（排除不必要的内容）
+# 复制文件（排除不必要的内容：依赖、构建产物、源码管理、个人配置、内部文档、运行数据）
 Write-Host "  复制文件..."
 robocopy $projectDir $tempDir /E /NFL /NDL /NJH /NJS /NC /NS `
-  /XD node_modules __pycache__ .git .claude data `
-  /XF *.pyc .env *.db
+  /XD node_modules __pycache__ .git .claude .vscode data dist 开发流程 `
+  /XF *.pyc .env *.db *.log
 
-# 确保 data 目录存在但为空
+# 确保 data 目录存在但为空（运行时生成）
 New-Item -ItemType Directory -Path "$tempDir\backend\data" -Force | Out-Null
-
-# 创建 .env.example
-@"
-# ===== 云端模式（默认）=====
-# DeepSeek API Key，注册地址：https://platform.deepseek.com
-DEEPSEEK_API_KEY=
-
-# ===== 本地模式（可选，配合 Ollama，不消耗 API token）=====
-# 使用步骤：
-#   1. 安装 Ollama 并拉取小模型：ollama pull qwen3:8b
-#   2. 取消下面两行注释，保存为 .env，重新启动项目
-# DEEPSEEK_API_BASE=http://127.0.0.1:11434/v1
-# DEEPSEEK_MODEL=qwen3:8b
-"@ | Out-File -FilePath "$tempDir\backend\.env.example" -Encoding UTF8
 
 # 压缩
 Write-Host "  压缩中..."
@@ -52,6 +38,7 @@ $zip = Get-Item $outputZip
 Write-Host "`n================================`n  打包完成！`n================================"
 Write-Host "  文件: $($zip.Name)"
 Write-Host "  大小: $([math]::Round($zip.Length/1KB, 1)) KB"
+Write-Host "  已包含: README.md（使用说明）、LICENSE、backend\.env.example"
 Write-Host "`n  接收方使用步骤："
 Write-Host "  Windows:"
 Write-Host "    1. 解压 ZIP 到任意目录"

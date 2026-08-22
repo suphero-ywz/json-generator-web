@@ -24,10 +24,10 @@ mkdir "!TEMP_DIR!"
 
 echo   复制文件...
 
-:: 复制整个项目（排除不必要的文件）
+:: 复制整个项目（排除不必要的文件：依赖、构建产物、源码管理、个人配置、内部文档、运行数据）
 robocopy "!PROJECT_DIR!" "!TEMP_DIR!" /E /NFL /NDL /NJH /NJS /NC /NS ^
-  /XD node_modules __pycache__ .git data ^
-  /XF *.pyc .env *.db >nul
+  /XD node_modules __pycache__ .git .claude .vscode data dist "开发流程" ^
+  /XF *.pyc .env *.db *.log >nul
 
 :: 确保 data 目录存在但为空
 mkdir "!TEMP_DIR!\backend\data" 2>nul
@@ -56,6 +56,7 @@ echo ================================
 echo.
 echo   文件: !OUTPUT_ZIP!
 echo   大小: !ZIP_KB! KB
+echo   已包含: README.md（使用说明）、LICENSE、backend\.env.example
 echo.
 echo   接收方使用步骤：
 echo   Windows:
