@@ -59,7 +59,8 @@ try {
     Write-Host ""
     Write-Host "  正在启动服务..." -ForegroundColor DarkGray
 
-    $beProc = Start-Process python -Arg "main.py" -WorkingDirectory "$dir\backend" -WindowStyle Hidden -PassThru
+    # -u 关闭 stdout 缓冲，后端 print 日志（含 token 统计）实时可见
+    $beProc = Start-Process python -Arg "-u", "main.py" -WorkingDirectory "$dir\backend" -WindowStyle Hidden -PassThru
     $feProc = Start-Process cmd   -Arg "/c npx vite --host" -WorkingDirectory "$dir\frontend" -WindowStyle Hidden -PassThru
 
     # ---- 等待就绪 ----

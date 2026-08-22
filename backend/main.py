@@ -52,19 +52,32 @@ _llm_model: str = PROVIDERS[resolve_provider("auto")]["model"]
 # 进行中的生成任务（task_id -> Task），用于取消生成
 _active_tasks: Dict[str, asyncio.Task] = {}
 
+# 进行中的生成任务进度（task_id -> {completed, total, files_done?, files_total?}）
+_task_progress: Dict[str, dict] = {}
 
-def _register_task(task_id: Optional[str]) -> Optional[str]:
-    """注册当前协程任务，返回实际使用的 task_id（未提供时不注册）。"""
+
+def _register_task(
+    task_id: Optional[str],
+    total: int = 0,
+    files_total: Optional[int] = None,
+) -> Optional[str]:
+    """注册当前协程任务并初始化进度，返回实际使用的 task_id（未提供时不注册）。"""
     if not task_id:
         return None
     _active_tasks[task_id] = asyncio.current_task()
+    prog = {"completed": 0, "total": total}
+    if files_total is not None:
+        prog["files_done"] = 0
+        prog["files_total"] = files_total
+    _task_progress[task_id] = prog
     return task_id
 
 
 def _unregister_task(task_id: Optional[str]) -> None:
-    """任务结束后从注册表移除。"""
+    """任务结束后从注册表移除并清理进度。"""
     if task_id:
         _active_tasks.pop(task_id, None)
+        _task_progress.pop(task_id, None)
 
 
 def _resolve_mode(request_mode: str) -> str:
@@ -154,7 +167,7 @@ async def api_status():
 @app.post("/api/generate", response_model=GenerateResponse)
 async def api_generate(req: GenerateRequest, request: Request):
     """单次生成"""
-    task_id = _register_task(req.task_id)
+    task_id = _register_task(req.task_id, total=req.total_count)
     try:
         categories = [c.model_dump() for c in req.categories]
         mode = _resolve_mode(req.mode)
@@ -163,6 +176,7 @@ async def api_generate(req: GenerateRequest, request: Request):
             categories, req.total_count, mode, req.actor_id,
             provider=provider,
             should_cancel=request.is_disconnected,
+            progress=_task_progress.get(task_id),
         )
         return GenerateResponse(**result)
     except asyncio.CancelledError:
@@ -177,7 +191,11 @@ async def api_generate(req: GenerateRequest, request: Request):
 @app.post("/api/generate/batch", response_model=BatchGenerateResponse)
 async def api_generate_batch(req: BatchGenerateRequest, request: Request):
     """批量生成"""
-    task_id = _register_task(req.task_id)
+    task_id = _register_task(
+        req.task_id,
+        total=req.total_count * req.file_count,
+        files_total=req.file_count,
+    )
     try:
         categories = [c.model_dump() for c in req.categories]
         mode = _resolve_mode(req.mode)
@@ -186,6 +204,7 @@ async def api_generate_batch(req: BatchGenerateRequest, request: Request):
             categories, req.total_count, req.file_count, mode, req.actor_id,
             provider=provider,
             should_cancel=request.is_disconnected,
+            progress=_task_progress.get(task_id),
         )
         return BatchGenerateResponse(**result)
     except asyncio.CancelledError:
@@ -211,6 +230,18 @@ async def api_cancel_generate(req: CancelRequest):
     for task in _active_tasks.values():
         task.cancel()
     return {"success": True}
+
+
+@app.get("/api/generate/progress")
+async def api_generate_progress(task_id: str = ""):
+    """查询生成任务进度（前端每 1.5 秒轮询）"""
+    if not task_id:
+        return {"success": False, "error": "缺少 task_id"}
+    prog = _task_progress.get(task_id)
+    if prog is None:
+        # 任务不存在或已结束（finally 已清理）——前端据此停止轮询
+        return {"success": False, "error": "任务不存在或已结束"}
+    return {"success": True, **prog}
 
 
 @app.get("/api/history")
@@ -246,13 +277,20 @@ async def api_regenerate(
     resolved_mode = _resolve_mode(mode)
     resolved_provider = _resolve_provider(provider)
 
-    task_id = _register_task(task_id)
+    if record["type"] == "single":
+        task_id = _register_task(task_id, total=count)
+    else:
+        task_id = _register_task(
+            task_id, total=count * record["file_count"],
+            files_total=record["file_count"],
+        )
     try:
         if record["type"] == "single":
             result = await generate(
                 categories, count, resolved_mode,
                 provider=resolved_provider,
                 should_cancel=request.is_disconnected,
+                progress=_task_progress.get(task_id),
             )
             return GenerateResponse(**result)
         else:
@@ -260,6 +298,7 @@ async def api_regenerate(
                 categories, count, record["file_count"], resolved_mode,
                 provider=resolved_provider,
                 should_cancel=request.is_disconnected,
+                progress=_task_progress.get(task_id),
             )
             return BatchGenerateResponse(**result)
     except asyncio.CancelledError:

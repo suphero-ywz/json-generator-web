@@ -596,6 +596,35 @@ table td.text-col {
   color: var(--text-secondary, #7f8c9b);
 }
 
+/* --- 生成进度条 --- */
+.progress-wrap {
+  max-width: 420px;
+  margin: 16px auto 0;
+}
+
+.progress-track {
+  height: 10px;
+  background: #eef1f5;
+  border: 1px solid var(--border);
+  border-radius: var(--radius-xs);
+  overflow: hidden;
+}
+
+.progress-fill {
+  height: 100%;
+  background: var(--accent);
+  border-radius: var(--radius-xs);
+  transition: width 0.4s ease;
+}
+
+.progress-text {
+  display: flex;
+  justify-content: space-between;
+  margin-top: 6px;
+  font-size: 0.8rem;
+  color: var(--text-secondary, #7f8c9b);
+}
+
 .error-state {
   text-align: center;
   padding: 20px;

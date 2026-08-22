@@ -107,8 +107,13 @@ async def generate(
     actor_id: str = "Skeleton0",
     provider: str = "auto",
     should_cancel: ShouldCancel = None,
+    progress: Optional[dict] = None,
 ) -> dict:
-    """单次生成，带重试补全确保达到目标条数。"""
+    """单次生成，带重试补全确保达到目标条数。
+
+    Args:
+        progress: 进度共享 dict（main.py 注册），每条记录完成时 completed += 1
+    """
     use_llm = (mode == "llm")
     category_counts = _calc_category_counts(categories, total_count)
     all_data: list[dict] = []
@@ -127,7 +132,12 @@ async def generate(
 
         sem = _provider_sem(provider)
 
-        async def _run_chunk(cat_name: str, count: int) -> list[dict]:
+        async def _run_chunk(cat_name: str, count: int) -> int:
+            """执行一个 chunk，完成后立即去重入列并更新进度，返回新增条数。
+
+            进度更新放在 chunk 级（而非整轮 gather 之后），
+            使长时间 LLM 任务的进度条按批推进，而不是 0→100 一跳。
+            """
             async with sem:
                 await _check_cancel(should_cancel)
                 used = set(r["query"] for r in all_data)
@@ -139,26 +149,28 @@ async def generate(
                     if not records:
                         records = [_pool_fallback(cat_name, used) for _ in range(count)]
                         records = [r for r in records if r is not None]
-                    return records
                 else:
                     records = [pool_generate_single(cat_name, used) for _ in range(count)]
-                    return [r for r in records if r is not None]
+                    records = [r for r in records if r is not None]
+                    # 让出事件循环：大批量同步生成时进度轮询请求能及时插队
+                    await asyncio.sleep(0)
+                added = 0
+                for r in records:
+                    fp = (r["query"], r["category"], r["motion_description"])
+                    if fp not in all_queries:
+                        all_data.append(r)
+                        all_queries.add(fp)
+                        added += 1
+                        if progress is not None:
+                            progress["completed"] += 1
+                return added
 
         if not chunks:
             break
 
         results = await asyncio.gather(*[_run_chunk(cat, n) for cat, n in chunks])
 
-        new_count = 0
-        for records in results:
-            for r in records:
-                fp = (r["query"], r["category"], r["motion_description"])
-                if fp not in all_queries:
-                    all_data.append(r)
-                    all_queries.add(fp)
-                    new_count += 1
-
-        if new_count == 0:
+        if sum(results) == 0:
             break
 
     # 最后一轮：放宽去重，允许同 query 不同 motion_description 的记录
@@ -170,21 +182,24 @@ async def generate(
         sf_by_cat = _calc_category_counts(categories, sf)
         extra_chunks = _split_into_chunks(sf_by_cat)
         sem2 = asyncio.Semaphore(CONCURRENCY)
-        async def _run_relaxed(cat_name: str, cnt: int) -> list[dict]:
+        async def _run_relaxed(cat_name: str, cnt: int) -> int:
             async with sem2:
                 await _check_cancel(should_cancel)
-                records = [pool_generate_single(cat_name, set()) for _ in range(cnt)]
-                return [r for r in records if r is not None]
+                added = 0
+                for _ in range(cnt):
+                    rec = pool_generate_single(cat_name, set())
+                    if rec is None:
+                        continue
+                    all_data.append(rec)
+                    added += 1
+                    if progress is not None:
+                        progress["completed"] += 1
+                return added
 
         extra_results = await asyncio.gather(
             *[_run_relaxed(cat, n) for cat, n in extra_chunks]
         )
-        added = 0
-        for records in extra_results:
-            for r in records:
-                all_data.append(r)
-                added += 1
-        if added == 0:
+        if sum(extra_results) == 0:
             break
 
     # 取消后不再保存任何数据
@@ -226,6 +241,7 @@ async def _generate_one_file(
     actor_id: str,
     provider: str,
     should_cancel: ShouldCancel,
+    progress: Optional[dict] = None,
 ) -> dict:
     """生成一个文件的全部记录（含重试补全），返回 {record_id, data, stats}。"""
     use_llm = (mode == "llm")
@@ -244,7 +260,8 @@ async def _generate_one_file(
 
         sem = _provider_sem(provider)
 
-        async def _run_chunk(cat_name: str, count: int) -> list[dict]:
+        async def _run_chunk(cat_name: str, count: int) -> int:
+            """执行一个 chunk，完成后立即去重入列并更新进度，返回新增条数。"""
             async with sem:
                 await _check_cancel(should_cancel)
                 used = set(r["query"] for r in file_data)
@@ -256,26 +273,28 @@ async def _generate_one_file(
                     if not records:
                         records = [_pool_fallback(cat_name, used) for _ in range(count)]
                         records = [r for r in records if r is not None]
-                    return records
                 else:
                     records = [pool_generate_single(cat_name, used) for _ in range(count)]
-                    return [r for r in records if r is not None]
+                    records = [r for r in records if r is not None]
+                    # 让出事件循环：大批量同步生成时进度轮询请求能及时插队
+                    await asyncio.sleep(0)
+                added = 0
+                for r in records:
+                    fp = (r["query"], r["category"], r["motion_description"])
+                    if fp not in file_queries:
+                        file_data.append(r)
+                        file_queries.add(fp)
+                        added += 1
+                        if progress is not None:
+                            progress["completed"] += 1
+                return added
 
         if not chunks:
             break
 
         results = await asyncio.gather(*[_run_chunk(cat, n) for cat, n in chunks])
 
-        new_count = 0
-        for records in results:
-            for r in records:
-                fp = (r["query"], r["category"], r["motion_description"])
-                if fp not in file_queries:
-                    file_data.append(r)
-                    file_queries.add(fp)
-                    new_count += 1
-
-        if new_count == 0:
+        if sum(results) == 0:
             break
 
     # 最后一轮：放宽去重
@@ -287,21 +306,24 @@ async def _generate_one_file(
         sf_by_cat = _calc_category_counts(categories, sf)
         extra_chunks = _split_into_chunks(sf_by_cat)
         sem3 = asyncio.Semaphore(CONCURRENCY)
-        async def _run_relaxed_b(cat_name: str, cnt: int) -> list[dict]:
+        async def _run_relaxed_b(cat_name: str, cnt: int) -> int:
             async with sem3:
                 await _check_cancel(should_cancel)
-                records = [pool_generate_single(cat_name, set()) for _ in range(cnt)]
-                return [r for r in records if r is not None]
+                added = 0
+                for _ in range(cnt):
+                    rec = pool_generate_single(cat_name, set())
+                    if rec is None:
+                        continue
+                    file_data.append(rec)
+                    added += 1
+                    if progress is not None:
+                        progress["completed"] += 1
+                return added
 
         extra_results = await asyncio.gather(
             *[_run_relaxed_b(cat, n) for cat, n in extra_chunks]
         )
-        added = 0
-        for records in extra_results:
-            for r in records:
-                file_data.append(r)
-                added += 1
-        if added == 0:
+        if sum(extra_results) == 0:
             break
 
     # 取消后不再保存任何数据
@@ -343,17 +365,26 @@ async def generate_batch(
     actor_id: str = "Skeleton0",
     provider: str = "auto",
     should_cancel: ShouldCancel = None,
+    progress: Optional[dict] = None,
 ) -> dict:
-    """批量生成（文件级有界并发，每个文件内带重试补全）。"""
+    """批量生成（文件级有界并发，每个文件内带重试补全）。
+
+    Args:
+        progress: 进度共享 dict（main.py 注册），completed 累计所有文件条数，
+            files_done 为已完成文件数
+    """
     file_sem = asyncio.Semaphore(
         OLLAMA_FILE_CONCURRENCY if provider == "ollama" else FILE_CONCURRENCY)
 
     async def _run_file() -> dict:
         async with file_sem:
             await _check_cancel(should_cancel)
-            return await _generate_one_file(
+            result = await _generate_one_file(
                 categories, total_count, file_count, mode,
-                actor_id, provider, should_cancel)
+                actor_id, provider, should_cancel, progress)
+            if progress is not None:
+                progress["files_done"] += 1  # 文件正常完成才计数
+            return result
 
     # gather 按传入顺序返回结果，files_data 顺序与文件序一致
     files_data = await asyncio.gather(*[_run_file() for _ in range(file_count)])

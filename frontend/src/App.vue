@@ -128,6 +128,12 @@
     <div class="card" v-if="generating">
       <div class="loading-state">
         正在生成数据，请稍候...（已等待 {{ elapsedStr }}）
+        <ProgressBar
+          :completed="progress.completed"
+          :total="progress.total"
+          :files-done="progress.filesDone"
+          :files-total="progress.filesTotal"
+        />
         <div class="loading-hint">LLM 模式下每条约 20-30 秒，条数较多时请耐心等待或点击「停止生成」</div>
       </div>
     </div>
@@ -160,6 +166,7 @@ import PreviewTable from './components/PreviewTable.vue'
 import DownloadButton from './components/DownloadButton.vue'
 import ImportButton from './components/ImportButton.vue'
 import HistoryPanel from './components/HistoryPanel.vue'
+import ProgressBar from './components/ProgressBar.vue'
 
 const ALL_CATEGORIES = [
   '站立', '行走', '跑步', '跳跃',
@@ -173,6 +180,7 @@ export default {
   components: {
     CategorySelector, WeightInput, CountInput, BatchPanel,
     GenerateButton, PreviewTable, DownloadButton, ImportButton, HistoryPanel,
+    ProgressBar,
   },
   data() {
     return {
@@ -196,11 +204,13 @@ export default {
       providers: [],
       healthChecking: false,
       elapsedSeconds: 0,
+      progress: { completed: 0, total: 0, filesDone: 0, filesTotal: 0 },
       _healthTimer: null,
       _abortController: null,
       _currentTaskId: null,
       _modeInitialized: false,
       _elapsedTimer: null,
+      _progressTimer: null,
     }
   },
   computed: {
@@ -261,6 +271,7 @@ export default {
   },
   beforeUnmount() {
     clearInterval(this._healthTimer)
+    this._stopProgressPoll()
     window.removeEventListener('pagehide', this._handlePageUnload)
   },
   methods: {
@@ -311,6 +322,39 @@ export default {
       }
     },
 
+    /** 开始进度轮询（每 1.5s 查询一次后端进度） */
+    _startProgressPoll() {
+      this._stopProgressPoll()
+      this.progress = { completed: 0, total: 0, filesDone: 0, filesTotal: 0 }
+      this._progressTimer = setInterval(() => this._pollProgress(), 1500)
+    },
+
+    /** 查询一次进度；后端返回 success:false 表示任务已结束，停止轮询 */
+    _pollProgress() {
+      if (!this._currentTaskId) return
+      api.progress(this._currentTaskId)
+        .then((res) => {
+          if (res.success) {
+            this.progress = {
+              completed: res.completed || 0,
+              total: res.total || 0,
+              filesDone: res.files_done || 0,
+              filesTotal: res.files_total || 0,
+            }
+          } else {
+            this._stopProgressPoll()
+          }
+        })
+        .catch(() => { /* 后端暂时不可达，忽略本轮，下轮再试 */ })
+    },
+
+    _stopProgressPoll() {
+      if (this._progressTimer) {
+        clearInterval(this._progressTimer)
+        this._progressTimer = null
+      }
+    },
+
     stopGenerate() {
       if (!this.generating) return
       // 通知后端停止任务（后端会中断后续 LLM 调用）
@@ -324,6 +368,7 @@ export default {
       this.generating = false
       this.errorMsg = '已停止生成'
       this._stopElapsed()
+      this._stopProgressPoll()
       this._endTask()
     },
 
@@ -359,6 +404,7 @@ export default {
       this._startElapsed()
 
       const opts = this._beginTask()
+      this._startProgressPoll()
       const categories = this.selectedCategories.map((name) => ({
         name,
         weight: this.weights[name] || 1,
@@ -410,6 +456,7 @@ export default {
       } finally {
         this.generating = false
         this._stopElapsed()
+        this._stopProgressPoll()
         this._endTask()
       }
     },
@@ -426,6 +473,7 @@ export default {
       this.generatedFiles = []
       this._startElapsed()
       const opts = this._beginTask()
+      this._startProgressPoll()
       try {
         const res = await api.regenerate(id, { ...opts, provider: this.provider })
         if (res.success) {
@@ -455,6 +503,7 @@ export default {
       } finally {
         this.generating = false
         this._stopElapsed()
+        this._stopProgressPoll()
         this._endTask()
         this.$refs.historyPanel?.refresh()
       }

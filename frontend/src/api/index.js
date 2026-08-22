@@ -44,6 +44,12 @@ export const api = {
     })
   },
 
+  /** 查询生成进度 */
+  progress(taskId) {
+    const params = new URLSearchParams({ task_id: taskId })
+    return request(`/generate/progress?${params}`)
+  },
+
   /** 历史记录 */
   history() {
     return request('/history')
