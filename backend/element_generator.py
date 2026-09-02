@@ -15,6 +15,7 @@ from element_pool import (
     get_category_config,
     get_emotions_for_category, get_actions_for_category,
 )
+from validator import EMOTION_SPEED_MAP
 
 
 def _pick(items: list) -> str:
@@ -302,7 +303,9 @@ def generate_single(category: str, used_queries: set[str]) -> dict | None:
         body_part = _pick(body_parts)
         emotion = _pick(emotions)
         amplitude = _pick(AMPLITUDES)
-        speed = _pick(SPEEDS)
+        # 情绪命中绑定映射时从允许速度池抽取，避免「爆发+慢速」类矛盾组合
+        allowed_speeds = EMOTION_SPEED_MAP.get(emotion)
+        speed = _pick(allowed_speeds) if allowed_speeds else _pick(SPEEDS)
         repeat = _pick(REPEATS)
 
         raw_query = _generate_query(action, category)

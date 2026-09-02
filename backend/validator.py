@@ -97,6 +97,16 @@ CATEGORY_REPEAT_LIMITS = {
     "跳跃": 3, "踏步": 4,
 }
 
+# 情绪-速度一致性映射 — 模块级共享：validator 校验用，
+# element_generator.generate_single 生成时同步按此约束抽取（源头收窄）
+EMOTION_SPEED_MAP = {
+    "爆发": ["快速"],
+    "优雅": ["慢速", "标准"],
+    "疲惫": ["慢速"],
+    "困倦": ["慢速"],
+    "惊吓": ["快速"],
+}
+
 BODY_PART_FORBIDDEN_ACTIONS = {
     "头部": ["踢", "踩", "跳", "跑", "打", "指", "握", "抓"],
     "脚": ["握", "抓", "指", "写", "画"],
@@ -188,15 +198,8 @@ def validate_content(data: dict) -> tuple[bool, str]:
     # --- 情绪-速度一致性 ---
     emotion_name = tags.get("情绪", "")
     speed = tags.get("速度", "")
-    emotion_speed_map = {
-        "爆发": ["快速"],
-        "优雅": ["慢速", "标准"],
-        "疲惫": ["慢速"],
-        "困倦": ["慢速"],
-        "惊吓": ["快速"],
-    }
-    if emotion_name in emotion_speed_map:
-        allowed = emotion_speed_map[emotion_name]
+    if emotion_name in EMOTION_SPEED_MAP:
+        allowed = EMOTION_SPEED_MAP[emotion_name]
         if speed and speed not in allowed:
             return False, f"情绪[{emotion_name}]必须配{'/'.join(allowed)}速度，当前为{speed}"
 
