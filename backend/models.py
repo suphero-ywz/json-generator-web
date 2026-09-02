@@ -52,6 +52,8 @@ class GenerateResponse(BaseModel):
     record_id: Optional[str] = None
     stats: Optional[dict] = None
     error: Optional[str] = None
+    # 质量元数据：generated / missing / rounds_used / llm_failures / discarded
+    meta: Optional[dict] = None
 
 
 class BatchGenerateResponse(BaseModel):
@@ -59,6 +61,7 @@ class BatchGenerateResponse(BaseModel):
     mode: str
     files: Optional[List[dict]] = None
     error: Optional[str] = None
+    meta: Optional[dict] = None
 
 
 class ProviderInfo(BaseModel):

@@ -372,6 +372,61 @@ body {
   color: #fff;
 }
 
+/* --- 生成结果状态条（缺口/纯度 + 补齐缺口） --- */
+.result-meta {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  flex-wrap: wrap;
+  padding: 10px 14px;
+  border: 1px solid var(--border);
+  border-left: 4px solid var(--success);
+  border-radius: var(--radius-sm);
+  background: #f2faf5;
+  margin-bottom: 12px;
+  font-size: 0.9rem;
+}
+.result-meta.warn {
+  border-left-color: var(--warning);
+  background: #fff8e1;
+}
+.result-meta .result-msg {
+  font-weight: 600;
+  color: var(--success);
+}
+.result-meta.warn .result-msg {
+  color: var(--warning);
+}
+.result-meta .result-detail {
+  color: var(--text-secondary, #7f8c9b);
+  font-size: 0.82rem;
+}
+.btn-fill {
+  padding: 6px 16px;
+  border: 1px solid var(--warning);
+  border-radius: var(--radius-sm);
+  background: #fff8e1;
+  color: #b07c0e;
+  cursor: pointer;
+  font-size: 0.88rem;
+  font-weight: 600;
+  transition: all 0.15s;
+}
+.btn-fill:hover {
+  background: var(--warning);
+  color: #fff;
+}
+.btn-fill:disabled {
+  opacity: 0.5;
+  cursor: not-allowed;
+}
+
+/* --- 补齐缺口进度条（内嵌预览卡状态条下方，随卡片宽左对齐） --- */
+.result-meta + .progress-wrap {
+  max-width: 100%;
+  margin: 0 0 12px;
+}
+
 /* --- Preview Table --- */
 .preview-header {
   display: flex;

@@ -73,7 +73,12 @@ export default {
       }
     },
     regenerate(rec) {
-      this.$emit('regenerate', { id: rec.id, type: rec.type })
+      // categoriesJson 随事件带出：历史重新生成后仍可按原类别「补齐缺口」
+      this.$emit('regenerate', {
+        id: rec.id,
+        type: rec.type,
+        categoriesJson: rec.categories_json,
+      })
     },
   },
 }

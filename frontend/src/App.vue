@@ -97,6 +97,32 @@
 
     <!-- 预览区域 -->
     <div class="card" v-if="generatedFiles.length > 0">
+      <!-- 生成结果状态条：缺口/纯度展示 + 「补齐缺口」入口 -->
+      <div
+        v-if="resultMeta"
+        :class="['result-meta', { warn: resultMeta.missing > 0 }]"
+      >
+        <template v-if="resultMeta.missing > 0">
+          <span class="result-msg">⚠ 缺口 {{ resultMeta.missing }} 条（已生成 {{ resultMeta.generated }} 条）</span>
+          <button
+            v-if="!fillingGap"
+            class="btn-fill"
+            :disabled="generating"
+            @click="fillGap"
+          >🔁 重试补齐缺口</button>
+        </template>
+        <span v-else class="result-msg">✅ 完整生成 {{ resultMeta.generated }} 条</span>
+        <span v-if="fillingGap" class="result-detail">⏳ 补齐中{{ fillProgressStr }}</span>
+        <span v-else-if="resultDetail" class="result-detail">（{{ resultDetail }}）</span>
+      </div>
+      <!-- 补齐缺口进度条：预览卡保持可见，进度条内嵌状态条下方（逐文件轮询数据） -->
+      <ProgressBar
+        v-if="fillingGap"
+        :completed="fillBar.completed"
+        :total="fillBar.total"
+        :files-done="fillBar.filesDone"
+        :files-total="fillBar.filesTotal"
+      />
       <PreviewTable
         :files="generatedFiles"
         :active-index="activeTab"
@@ -124,8 +150,8 @@
       </div>
     </div>
 
-    <!-- 加载状态 -->
-    <div class="card" v-if="generating">
+    <!-- 加载状态（补齐缺口期间预览卡保持可见，进度显示在状态条内） -->
+    <div class="card" v-if="generating && generatedFiles.length === 0">
       <div class="loading-state">
         正在生成数据，请稍候...（已等待 {{ elapsedStr }}）
         <ProgressBar
@@ -211,6 +237,13 @@ export default {
       _modeInitialized: false,
       _elapsedTimer: null,
       _progressTimer: null,
+      // 缺口/纯度展示 + 补齐缺口
+      lastGen: null,        // 最近一次生成的配置快照（类别/模式/provider/actorId）
+      fillingGap: false,    // 补齐缺口进行中（预览卡保持可见）
+      _fillTotal: 0,        // 本次补齐总目标条数
+      _fillDone: 0,         // 本次已补齐条数
+      _fillJobs: 0,         // 缺额文件总数
+      _fillIndex: 0,        // 正在补齐第几个文件
     }
   },
   computed: {
@@ -261,6 +294,47 @@ export default {
       if (!f) return `${this.baseFilename}.json`
       const idx = this.activeTab + 1
       return `${this.baseFilename}_${String(idx).padStart(2, '0')}.json`
+    },
+    /** 本次生成聚合质量元数据（逐文件 meta 聚合；任一文件无 meta 则不显示） */
+    resultMeta() {
+      if (this.generatedFiles.length === 0) return null
+      const metas = this.generatedFiles.map((f) => f.meta).filter(Boolean)
+      if (metas.length !== this.generatedFiles.length) return null
+      const agg = { generated: 0, missing: 0, llm_failures: 0, discarded: 0 }
+      for (const m of metas) {
+        agg.generated += m.generated || 0
+        agg.missing += m.missing || 0
+        agg.llm_failures += m.llm_failures || 0
+        agg.discarded += m.discarded || 0
+      }
+      // 轮数仅在单文件时透传（多文件每文件口径不同，聚合会误导——与后端顶层 meta 同约定）
+      if (metas.length === 1) agg.rounds_used = metas[0].rounds_used || 0
+      return agg
+    },
+    /** 纯度/重试损耗细节（有损耗才显示） */
+    resultDetail() {
+      const m = this.resultMeta
+      if (!m) return ''
+      const parts = []
+      if (m.discarded > 0) parts.push(`护栏丢弃 ${m.discarded} 条`)
+      if (m.llm_failures > 0) parts.push(`LLM 失败 ${m.llm_failures} 次`)
+      if (m.rounds_used > 1) parts.push(`用 ${m.rounds_used} 轮补齐`)
+      return parts.join(' · ')
+    },
+    /** 补齐缺口状态条文案：多文件时提示当前文件序，条数交给进度条展示 */
+    fillProgressStr() {
+      if (!this.fillingGap) return ''
+      return this._fillJobs > 1 ? ` · 第 ${this._fillIndex}/${this._fillJobs} 个文件` : ''
+    },
+    /** 补齐缺口进度条数据：已完成文件条数和 + 当前文件轮询完成数。
+     *  文件维度仅在多文件补缺时展示（单文件即一条任务，无文件进度意义）。 */
+    fillBar() {
+      return {
+        completed: this._fillDone + this.progress.completed,
+        total: this._fillTotal,
+        filesDone: this._fillJobs > 1 ? Math.max(0, this._fillIndex - 1) : 0,
+        filesTotal: this._fillJobs > 1 ? this._fillJobs : 0,
+      }
     },
   },
   async created() {
@@ -409,6 +483,13 @@ export default {
         name,
         weight: this.weights[name] || 1,
       }))
+      // 记录本次生成快照，供「补齐缺口」复用相同参数（只补缺量，不重生成已有数据）
+      this.lastGen = {
+        categories,
+        mode: this.generationMode,
+        provider: this.provider,
+        actorId: this.actorId,
+      }
 
       try {
         if (this.batchMode) {
@@ -424,6 +505,7 @@ export default {
               record_id: f.record_id,
               data: f.data,
               stats: f.stats,
+              meta: f.meta,
             }))
             this.activeTab = 0
           } else {
@@ -441,6 +523,7 @@ export default {
               record_id: res.record_id,
               data: res.data,
               stats: res.stats,
+              meta: res.meta,
             }]
             this.activeTab = 0
           } else {
@@ -467,7 +550,7 @@ export default {
       }
     },
 
-    async handleRegenerate({ id, type }) {
+    async handleRegenerate({ id, type, categoriesJson }) {
       this.generating = true
       this.errorMsg = ''
       this.generatedFiles = []
@@ -482,15 +565,23 @@ export default {
               record_id: res.record_id,
               data: res.data,
               stats: res.stats,
+              meta: res.meta,
             }]
           } else if (res.files) {
             this.generatedFiles = res.files.map((f) => ({
               record_id: f.record_id,
               data: f.data,
               stats: f.stats,
+              meta: f.meta,
             }))
           }
           this.activeTab = 0
+          // 历史记录不存 actor_id（regenerate 即默认 Skeleton0），补齐缺口沿用历史类别即可
+          this.lastGen = {
+            categories: this._parseCategories(categoriesJson),
+            mode: res.mode || this.generationMode,
+            provider: this.provider,
+          }
         } else {
           this.errorMsg = res.error || '重新生成失败'
         }
@@ -506,6 +597,83 @@ export default {
         this._stopProgressPoll()
         this._endTask()
         this.$refs.historyPanel?.refresh()
+      }
+    },
+
+    /** 补齐缺口：仅对缺额文件按最近一次生成配置补生成 missing 条并追加到文件尾部。
+     *  逐文件串行，中途失败即停（残余缺口如实保留在 meta，可稍后再点补齐）。 */
+    async fillGap() {
+      if (this.generating || !this.lastGen) return
+      const jobs = this.generatedFiles
+        .map((f) => ({ file: f, missing: (f.meta && f.meta.missing) || 0 }))
+        .filter((j) => j.missing > 0)
+      if (jobs.length === 0) return
+
+      this.generating = true
+      this.fillingGap = true
+      this.errorMsg = ''
+      this._startElapsed()
+      const snap = this.lastGen
+      this._fillTotal = jobs.reduce((s, j) => s + j.missing, 0)
+      this._fillDone = 0
+      this._fillJobs = jobs.length
+      this._fillIndex = 0
+
+      try {
+        for (const job of jobs) {
+          this._fillIndex += 1
+          const opts = this._beginTask()
+          this._startProgressPoll()
+          let res
+          try {
+            const payload = {
+              total_count: job.missing,
+              categories: snap.categories,
+              provider: snap.provider,
+            }
+            if (snap.actorId) payload.actor_id = snap.actorId
+            res = await api.generate(payload, snap.mode, opts)
+          } finally {
+            this._stopProgressPoll()
+            this._endTask()
+          }
+          if (!res.success || !res.data || res.data.length === 0) {
+            this.errorMsg = res.error || '补齐缺口失败'
+            break
+          }
+          const fm = res.meta || {}
+          const old = job.file.meta || {}
+          job.file.data = job.file.data.concat(res.data)
+          job.file.meta = {
+            generated: (old.generated || 0) + (fm.generated || 0),
+            missing: fm.missing || 0,               // 本轮残余缺口 = 合并后的缺口
+            rounds_used: (old.rounds_used || 0) + (fm.rounds_used || 0),
+            llm_failures: (old.llm_failures || 0) + (fm.llm_failures || 0),
+            discarded: (old.discarded || 0) + (fm.discarded || 0),
+          }
+          this._fillDone += fm.generated || 0
+        }
+      } catch (e) {
+        if (e.name === 'AbortError') {
+          this.errorMsg = '已停止补齐缺口（已补部分保留，可稍后继续）'
+        } else {
+          this.errorMsg = e.message || '补齐缺口请求失败'
+        }
+      } finally {
+        this.generating = false
+        this.fillingGap = false
+        this._stopElapsed()
+        this._stopProgressPoll()
+        this._endTask()
+      }
+    },
+
+    _parseCategories(json) {
+      try {
+        const list = JSON.parse(json || '[]')
+        return Array.isArray(list) ? list : []
+      } catch {
+        return []
       }
     },
 
