@@ -92,10 +92,21 @@ fi
 echo ""
 echo "安装 Python 依赖..."
 cd "$PROJECT_DIR/backend"
-$PYTHON -m pip install -r requirements.txt -q
+
+# 使用项目内虚拟环境，避免污染系统 Python（Ubuntu 24.04 默认禁止系统级 pip 安装）
+VENV_PYTHON="$PROJECT_DIR/backend/.venv/bin/python"
+if [ ! -x "$VENV_PYTHON" ]; then
+    echo "  创建虚拟环境 .venv ..."
+    if ! $PYTHON -m venv "$PROJECT_DIR/backend/.venv"; then
+        echo -e "  ${RED}虚拟环境创建失败，请先安装: sudo apt install python3-venv${NC}"
+        exit 1
+    fi
+fi
+
+$VENV_PYTHON -m pip install -r requirements.txt -q
 if [ $? -ne 0 ]; then
     echo -e "  ${YELLOW}Python 依赖安装失败，正在重试...${NC}"
-    $PYTHON -m pip install -r requirements.txt -q --default-timeout=60
+    $VENV_PYTHON -m pip install -r requirements.txt -q --default-timeout=60
     if [ $? -ne 0 ]; then
         echo -e "  ${RED}Python 依赖安装失败，请检查网络连接后重试${NC}"
         exit 1

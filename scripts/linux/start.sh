@@ -3,14 +3,19 @@
 SCRIPT_DIR="$(cd "$(dirname "$0")" && pwd)"
 PROJECT_DIR="$(cd "$SCRIPT_DIR/../.." && pwd)"
 
-# 检测 Python 命令
+# 检测 Python 命令（优先使用项目虚拟环境）
 PYTHON=""
-for cmd in python3 python; do
-    if command -v $cmd &>/dev/null; then
-        PYTHON=$cmd
-        break
-    fi
-done
+VENV_PYTHON="$PROJECT_DIR/backend/.venv/bin/python"
+if [ -x "$VENV_PYTHON" ]; then
+    PYTHON="$VENV_PYTHON"
+else
+    for cmd in python3 python; do
+        if command -v $cmd &>/dev/null; then
+            PYTHON=$cmd
+            break
+        fi
+    done
+fi
 
 RED='\033[0;31m'
 GREEN='\033[0;32m'
@@ -77,7 +82,7 @@ check() {
 }
 
 # ---- 首次运行检查 ----
-if [ ! -d "$PROJECT_DIR/frontend/node_modules" ]; then
+if [ ! -d "$PROJECT_DIR/frontend/node_modules" ] || [ ! -x "$PROJECT_DIR/backend/.venv/bin/python" ]; then
     echo "  首次运行 - 需要先安装依赖，请稍候..."
     bash "$SCRIPT_DIR/setup.sh"
     if [ $? -ne 0 ]; then
@@ -107,7 +112,7 @@ fi
 
 cd "$PROJECT_DIR/backend"
 # setsid: 服务各自成为独立进程组，停止时可整组终止，避免子进程变孤儿
-setsid $PYTHON main.py &>/dev/null &
+setsid "$PYTHON" main.py &>/dev/null &
 BE_PID=$!
 
 cd "$PROJECT_DIR/frontend"
