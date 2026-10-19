@@ -23,3 +23,6 @@ backend/*.log
 .claude/
 *.swp
 *.swo
+
+# 交接文档（本地交接用，不上传 GitHub）
+交接文档.md
